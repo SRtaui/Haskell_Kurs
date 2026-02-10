@@ -60,11 +60,11 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - curs       # Ваша библиотека
+    - curs      
     - base
     - tasty
     - tasty-hunit
     - tasty-quickcheck
     - bytestring
-    - directory      # Для удаления временных файлов
+    - directory      #
     - filepath

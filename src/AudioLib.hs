@@ -16,9 +16,7 @@ import Text.Parsec.String (Parser)
 import Control.Monad (when, replicateM)
 import Data.List (transpose, foldl')
 
--- ============================================================
 -- CORE LOGIC
--- ============================================================
 type Sample = Double
 type Signal = [Sample]
 type Hz = Double
@@ -33,7 +31,7 @@ samplesPerPeriod hz = round (mySampleRate / hz)
 samplesPerSecond :: Seconds -> Int
 samplesPerSecond duration = round (duration * mySampleRate)
 
--- Waveforms
+
 type Wave = Double -> Sample
 sine :: Wave
 sine t = Prelude.sin (2 * pi * t)
@@ -96,10 +94,7 @@ zipWithLong f [] ys = ys
 zipWithLong f xs [] = xs
 zipWithLong f (x:xs) (y:ys) = f x y : zipWithLong f xs ys
 
--- ============================================================
 -- AUDIO TYPES
--- ============================================================
-
 data Audio = Audio
   { sampleRate :: Int
   , channels :: [[Double]]
@@ -111,10 +106,8 @@ data NoteDTO = NoteDTO
   , isRest :: Bool
   } deriving (Show)
 
--- ============================================================
--- PARSER
--- ============================================================
 
+-- PARSER
 parseComposition :: String -> Either ParseError [NoteDTO]
 parseComposition = parse (many noteParser) ""
 
@@ -143,10 +136,8 @@ noteToFreq name octave =
       semitone = case lookup name noteMap of Just n -> n; Nothing -> 0
   in 440.0 * (2.0 ** (fromIntegral (semitone + (octave - 4) * 12 - 9) / 12.0))
 
--- ============================================================
--- SYNTHESIS
--- ============================================================
 
+-- SYNTHESIS
 synthesize :: [NoteDTO] -> Audio
 synthesize notes = 
     let 
@@ -161,10 +152,7 @@ synthesize notes =
     in
         Audio (round mySampleRate) [finalSig]
 
--- ============================================================
 -- WAV I/O
--- ============================================================
-
 readWav :: FilePath -> IO (Either String Audio)
 readWav path = do
   content <- BL.readFile path
@@ -242,10 +230,8 @@ interleave chans = concat $ transpose chans
 toPCM16 :: Double -> Int16
 toPCM16 x = round (max (-1.0) (min 1.0 x) * 32767.0)
 
--- ============================================================
--- EDITING
--- ============================================================
 
+-- EDITING
 trimAudio :: Double -> Double -> Audio -> Audio
 trimAudio start end (Audio rate chans) = 
     let startSamp = floor (start * fromIntegral rate)
@@ -256,43 +242,33 @@ trimAudio start end (Audio rate chans) =
 concatAudio :: Audio -> Audio -> Audio
 concatAudio (Audio r1 c1) (Audio r2 c2) =
     let 
-        -- 1. Ресэмплинг второго файла, если частоты разные
+        
         c2Resampled = if r1 == r2 then c2 else map (resample r2 r1) c2
         
-        -- 2. Определяем длины (в сэмплах)
+    
         len1 = if null c1 then 0 else length (head c1)
         len2 = if null c2Resampled then 0 else length (head c2Resampled)
-        
-        -- 3. Определяем максимальное число каналов
         maxChans = max (length c1) (length c2Resampled)
-        
-        -- 4. Функция получения канала: если канала нет, возвращаем тишину нужной длины
         getChan chans idx len = 
             if idx < length chans 
             then chans !! idx 
             else replicate len 0.0
-            
-        -- 5. Собираем новые каналы
         newChannels = [ getChan c1 i len1 ++ getChan c2Resampled i len2 
                       | i <- [0 .. maxChans - 1] ]
     in Audio r1 newChannels
--- БЫСТРЫЙ РЕСЭМПЛИНГ (O(N) вместо O(N^2))
+
 resample :: Int -> Int -> [Double] -> [Double]
 resample fromRate toRate input = go 0.0 input
   where
-    -- step: на сколько продвигаемся по "входному" индексу за один "выходной" сэмпл
     step = fromIntegral fromRate / fromIntegral toRate :: Double
 
     go :: Double -> [Double] -> [Double]
-    go _ [] = [] -- Если вход кончился, выход тоже кончается
+    go _ [] = [] 
     go pos list@(y:ys)
-      | pos < 1.0 = y : go (pos + step) list -- Берем текущий сэмпл, увеличиваем "фазу", список не сдвигаем
-      | otherwise = go (pos - 1.0) ys        -- Скипаем сэмпл (сдвигаем окно), уменьшаем "фазу"
+      | pos < 1.0 = y : go (pos + step) list 
+      | otherwise = go (pos - 1.0) ys        
 
--- ============================================================
 -- EFFECTS
--- ============================================================
-
 changeAmplitude :: Double -> Audio -> Audio
 changeAmplitude f (Audio r c) = Audio r (map (map (* f)) c)
 
@@ -308,7 +284,7 @@ removeByAmplitude mode thr (Audio r c) = Audio r (map (map check) c)
     check x = case mode of 
         "lower"  -> if abs x < thr then 0 else x
         "higher" -> if abs x > thr then 0 else x
-        "equal"  -> if abs (x - thr) < 0.0001 then 0 else x -- Equal with epsilon
+        "equal"  -> if abs (x - thr) < 0.0001 then 0 else x 
         _ -> x
 
 normalize :: Double -> Audio -> Audio
