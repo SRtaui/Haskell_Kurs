@@ -52,7 +52,7 @@ executables:
     - curs
 
 tests:
-  curs-test:
+  cursv1-test:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
@@ -60,4 +60,11 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - curs
+    - curs       # Ваша библиотека
+    - base
+    - tasty
+    - tasty-hunit
+    - tasty-quickcheck
+    - bytestring
+    - directory      # Для удаления временных файлов
+    - filepath

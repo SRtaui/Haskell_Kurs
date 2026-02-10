@@ -1,151 +1,88 @@
 {-# LANGUAGE RecordWildCards #-}
-
 module Main where
 
 import AudioLib
+import AppLogic
 import System.IO
-import Control.Exception
 
--- CLI утилиты
-prompt :: IO String
+-- Утилиты (prompt, askFile, askDouble - те же)
 prompt = putStr "> " >> hFlush stdout >> getLine
+askFile l = putStrLn l >> prompt
+askDouble l = putStrLn l >> prompt >>= \s -> case reads s of [(x,"")] -> return x; _ -> putStrLn "Err" >> askDouble l
+drawHeader Nothing = putStrLn "None"
+drawHeader (Just (Audio r c)) = putStrLn $ "Audio: " ++ show r ++ "Hz, " ++ show (length c) ++ "ch, " ++ show (length (head c) `div` r) ++ "s"
 
-askFile :: String -> IO FilePath
-askFile label = putStrLn label >> prompt
+main = hSetBuffering stdout NoBuffering >> mainMenu Nothing
 
-askDouble :: String -> IO Double
-askDouble label = do
-  putStrLn label
-  s <- prompt
-  case reads s of
-    [(x, "")] -> return x
-    _ -> putStrLn "Error: invalid number" >> askDouble label
-
-drawHeader :: Maybe Audio -> IO ()
-drawHeader cur = do
-  putStrLn "\n=== Audio Synthesizer ==="
-  case cur of
-    Nothing -> putStrLn "Current: none"
-    Just (Audio rate chans) -> 
-      putStrLn $ "Current: " ++ show rate ++ "Hz, " ++ show (length chans) ++ "ch"
-  putStrLn ""
-
--- Главное меню
-main :: IO ()
-main = do
-  hSetBuffering stdout NoBuffering
-  hSetEncoding stdout utf8
-  mainMenu Nothing
-
-mainMenu :: Maybe Audio -> IO ()
 mainMenu cur = do
   drawHeader cur
-  putStrLn "Main menu:"
-  putStrLn "  1. Files"
-  putStrLn "  2. Synthesis"
-  putStrLn "  3. Effects"
-  putStrLn "  0. Exit"
+  putStrLn "1. Files & IO"
+  putStrLn "2. Synthesis"
+  putStrLn "3. Effects"
+  putStrLn "4. Editing (Cut/Paste)"  -- НОВЫЙ ПУНКТ
+  putStrLn "0. Exit"
   c <- prompt
   case c of
     "1" -> filesMenu cur
     "2" -> synthMenu cur
     "3" -> effectsMenu cur
-    "0" -> putStrLn "Bye" >> return ()
-    _ -> putStrLn "Invalid option" >> mainMenu cur
+    "4" -> editMenu cur
+    "0" -> return ()
+    _   -> mainMenu cur
 
--- Меню файлов
-filesMenu :: Maybe Audio -> IO ()
+-- FILES (обновлено)
 filesMenu cur = do
-  drawHeader cur
-  putStrLn "Files:"
-  putStrLn "  1. Load WAV"
-  putStrLn "  2. Save WAV"
-  putStrLn "  3. Mix with WAV"
-  putStrLn "  9. Back"
-  c <- prompt
-  case c of
-    "1" -> do
-      f <- askFile "WAV file path:"
-      r <- readWav f
-      case r of
-        Left e -> putStrLn ("Error: " ++ e) >> filesMenu cur
-        Right a -> putStrLn "Loaded" >> mainMenu (Just a)
-    "2" ->
-      case cur of
-        Nothing -> putStrLn "No audio to save" >> filesMenu cur
-        Just a -> do
-          f <- askFile "Output file:"
-          writeWav f a
-          putStrLn "Saved"
-          mainMenu cur
-    "3" ->
-      case cur of
-        Nothing -> putStrLn "Load audio first" >> filesMenu cur
-        Just a1 -> do
-          f <- askFile "WAV to mix:"
-          r <- readWav f
-          case r of
-            Left e -> putStrLn ("Error: " ++ e) >> filesMenu cur
-            Right a2 -> do
-              let mixed = mixAudio a1 a2
-              putStrLn "Mixed"
-              mainMenu (Just mixed)
-    "9" -> mainMenu cur
-    _ -> putStrLn "Invalid option" >> filesMenu cur
+    putStrLn "1. Load\n2. Save\n3. Mix (Overlay)\n9. Back"
+    c <- prompt
+    case c of
+        "1" -> askFile "Path:" >>= loadWavLogic >>= \r -> case r of Left e -> print e >> filesMenu cur; Right a -> mainMenu (Just a)
+        "2" -> case cur of Nothing -> print "No audio" >> filesMenu cur; Just a -> askFile "Out:" >>= \f -> writeWav f a >> mainMenu cur
+        "3" -> case cur of Nothing -> print "No audio" >> filesMenu cur; Just a -> askFile "Path:" >>= mixWavLogic a >>= \r -> case r of Left e -> print e >> filesMenu cur; Right a2 -> mainMenu (Just a2)
+        "9" -> mainMenu cur
+        _   -> filesMenu cur
 
--- Меню синтеза
-synthMenu :: Maybe Audio -> IO ()
+-- SYNTH (то же)
 synthMenu cur = do
-  drawHeader cur
-  putStrLn "Synthesis:"
-  putStrLn "  1. From TXT file"
-  putStrLn "  9. Back"
-  c <- prompt
-  case c of
-    "1" -> do
-      f <- askFile "TXT file (format: C4 0.5):"
-      content <- readFile f
-      case parseComposition content of
-        Left e -> putStrLn ("Parse error: " ++ show e) >> synthMenu cur
-        Right notes -> do
-          let a = synthesize notes
-          putStrLn $ "Synthesized " ++ show (length notes) ++ " notes"
-          mainMenu (Just a)
-    "9" -> mainMenu cur
-    _ -> putStrLn "Invalid option" >> synthMenu cur
+    putStrLn "1. From TXT\n9. Back"
+    c <- prompt
+    case c of
+        "1" -> askFile "Path:" >>= readFile >>= \t -> case synthLogic t of Left e -> print e >> synthMenu cur; Right a -> mainMenu (Just a)
+        "9" -> mainMenu cur
+        _   -> synthMenu cur
 
--- Меню эффектов
-effectsMenu :: Maybe Audio -> IO ()
+-- EDITING (НОВОЕ МЕНЮ)
+editMenu cur = do
+    putStrLn "1. Trim (Start End)\n2. Concat (Append File)\n9. Back"
+    c <- prompt
+    case c of
+        "1" -> case cur of 
+            Nothing -> print "No audio" >> editMenu cur
+            Just a -> do
+                s <- askDouble "Start (sec):"
+                e <- askDouble "End (sec):"
+                mainMenu (Just $ trimLogic s e a)
+        "2" -> case cur of
+            Nothing -> print "No audio" >> editMenu cur
+            Just a -> do
+                f <- askFile "File to append:"
+                res <- concatLogic a f
+                case res of Left e -> print e >> editMenu cur; Right a2 -> mainMenu (Just a2)
+        "9" -> mainMenu cur
+        _   -> editMenu cur
+
+-- EFFECTS (обновлено)
 effectsMenu cur = do
-  drawHeader cur
-  putStrLn "Effects:"
-  putStrLn "  1. Volume (factor)"
-  putStrLn "  2. Speed (factor)"
-  putStrLn "  3. Normalize"
-  putStrLn "  4. Gate (threshold)"
-  putStrLn "  5. Echo"
-  putStrLn "  6. Distortion"
-  putStrLn "  9. Back"
-  c <- prompt
-  case c of
-    "1" -> withAudio cur $ \a -> do 
-      x <- askDouble "Volume factor (0.5=quieter, 2.0=louder):"
-      pure (changeAmplitude x a)
-    "2" -> withAudio cur $ \a -> do 
-      x <- askDouble "Speed factor (0.5=slower, 2.0=faster):"
-      pure (changeSpeed x a)
-    "3" -> withAudio cur $ \a -> pure (normalize 1.0 a)
-    "4" -> withAudio cur $ \a -> do 
-      x <- askDouble "Threshold (0.0-1.0):"
-      pure (removeByAmplitude "lower" x a)
-    "5" -> withAudio cur $ \a -> pure (applyEcho 0.5 0.8 a)
-    "6" -> withAudio cur $ \a -> pure (applyDistortion 50.0 a)
-    "9" -> mainMenu cur
-    _ -> putStrLn "Invalid option" >> effectsMenu cur
-  where
-    withAudio :: Maybe Audio -> (Audio -> IO Audio) -> IO ()
-    withAudio Nothing _ = putStrLn "No audio loaded" >> effectsMenu cur
-    withAudio (Just a) f = do
-      a' <- f a
-      putStrLn "Applied"
-      mainMenu (Just a')
+    putStrLn "1. Volume\n2. Speed\n3. Normalize\n4. Gate\n5. Echo\n6. Distortion\n9. Back"
+    c <- prompt
+    case c of
+        "1" -> withAudio cur $ \a -> askDouble "Factor:" >>= \x -> return (effectVolumeLogic x a)
+        "2" -> withAudio cur $ \a -> askDouble "Factor:" >>= \x -> return (effectSpeedLogic x a)
+        "3" -> withAudio cur $ \a -> return (effectNormalizeLogic a)
+        "4" -> withAudio cur $ \a -> askDouble "Threshold:" >>= \x -> return (gateLogic x a)
+        "5" -> withAudio cur $ \a -> return (effectEchoLogic a)
+        "6" -> withAudio cur $ \a -> return (distortLogic a)
+        "9" -> mainMenu cur
+        _   -> effectsMenu cur
+
+withAudio Nothing _ = print "No audio" >> effectsMenu Nothing
+withAudio (Just a) f = f a >>= \a' -> print "Applied" >> mainMenu (Just a')

@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      AppLogic
       AudioLib
       Lib
   other-modules:
@@ -58,7 +59,7 @@ executable curs-exe
     , parsec >=3.1
   default-language: Haskell2010
 
-test-suite curs-test
+test-suite cursv1-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
@@ -69,9 +70,14 @@ test-suite curs-test
       test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      base
     , binary >=0.8
-    , bytestring >=0.11
+    , bytestring
     , curs
+    , directory
+    , filepath
     , parsec >=3.1
+    , tasty
+    , tasty-hunit
+    , tasty-quickcheck
   default-language: Haskell2010
