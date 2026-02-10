@@ -5,33 +5,38 @@
 
 module AudioLib where
 
-import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Lazy as BL--нужно для обработки сырых файлов в readWav и writeWav
 import qualified Data.ByteString as BS
 import Data.Binary.Get
-import Data.Binary.Put
+import Data.Binary.Put--нужны чтобы собрать и разобрать бинарные стурктуры данных используется для сканирования чанков
 import Data.Int (Int16, Int32)
-import Data.Word (Word8, Word16, Word32)
+import Data.Word (Word8, Word16, Word32)--типы с фиксированной разрядностью, нужны для нормализации
 import Text.Parsec
-import Text.Parsec.String (Parser)
-import Control.Monad (when, replicateM)
-import Data.List (transpose, foldl')
+import Text.Parsec.String (Parser) -- используется для парсера нот, строка -> NoteDTO
+import Control.Monad (when, replicateM) -- нужно для scanChunks чтобы прочитать много семплов и записать в список
+import Data.List (transpose, foldl') --нужно для переплетения каналов в interLeave, folfd' 
 
--- CORE LOGIC
+-- Часть 1. Базовая логика синтезатора (из глав 10-11)
+
+-- Определение базовых типов данных для сигнала
 type Sample = Double
 type Signal = [Sample]
 type Hz = Double
 type Seconds = Double
 
+-- Частота дискретизации по умолчанию
 mySampleRate :: Double
 mySampleRate = 44100.0
 
+-- Расчет количества семплов на один период волны
 samplesPerPeriod :: Hz -> Int
 samplesPerPeriod hz = round (mySampleRate / hz)
 
+-- Расчет количества семплов в секундах
 samplesPerSecond :: Seconds -> Int
 samplesPerSecond duration = round (duration * mySampleRate)
 
-
+-- Генерация форм волны (Синус, Квадрат, Пила, Треугольник)
 type Wave = Double -> Sample
 sine :: Wave
 sine t = Prelude.sin (2 * pi * t)
@@ -47,9 +52,11 @@ tri :: Wave
 tri t | t <= 0.5  = 4 * t - 1
       | otherwise = -4 * t + 3
 
+-- Генерация тишины заданной длительности
 silence :: Seconds -> Signal
 silence t = replicate (samplesPerSecond t) 0
 
+-- Генерация тона определенной частоты и волны
 tone :: Wave -> Hz -> Seconds -> Signal
 tone wave freq t = map wave periodValues
   where
@@ -59,7 +66,7 @@ tone wave freq t = map wave periodValues
       | i <- [0 .. samplesPerSecond t - 1]
       ]
 
--- ADSR
+-- Генератор огибающей (ADSR)
 data ADSR = ADSR { attack :: Seconds, decay :: Seconds, sustain :: Double, release :: Seconds } deriving Show
 adsr :: ADSR -> Signal -> Signal
 adsr ADSR{..} sig = zipWith3 (\a d s -> a * d * s) (att ++ dec ++ sus) rel sig
@@ -72,7 +79,7 @@ adsr ADSR{..} sig = zipWith3 (\a d s -> a * d * s) (att ++ dec ++ sus) rel sig
   sus = repeat sustain
   rel = reverse $ take (length sig) $ map (/ relSamples) [0.0 .. relSamples] ++ repeat 1.0
 
--- Oscillator
+-- Реализация Осциллятора для обработки событий
 data Event = Tone { evFreq :: Hz, evStart :: Seconds, evDur :: Seconds }
            | Silence { evStart :: Seconds, evDur :: Seconds } deriving Show
 newtype Oscillator = Osc { playEvent :: Event -> Signal }
@@ -86,9 +93,11 @@ osc w env = Osc f
 defaultOsc :: Oscillator
 defaultOsc = osc sine (ADSR 0.01 0.1 0.8 0.1)
 
+-- Смешивание нескольких сигналов в один
 mixSignals :: [Signal] -> Signal
 mixSignals = foldr (zipWithLong (+)) []
 
+-- Вспомогательная функция для zip списков разной длины
 zipWithLong :: (a -> a -> a) -> [a] -> [a] -> [a]
 zipWithLong f [] ys = ys
 zipWithLong f xs [] = xs
@@ -106,11 +115,13 @@ data NoteDTO = NoteDTO
   , isRest :: Bool
   } deriving (Show)
 
+-- Часть 2. Парсер текстового файла с нотными структурами
 
--- PARSER
+--запускает парсер, если вернула Right то все хорошо, Left - ошибка
 parseComposition :: String -> Either ParseError [NoteDTO]
 parseComposition = parse (many noteParser) ""
 
+--читает одну ноту(ищет название ноты, октаву,длительность)
 noteParser :: Parser NoteDTO
 noteParser = do
   spaces
@@ -130,6 +141,7 @@ noteParser = do
         let f = noteToFreq name oct
         return $ NoteDTO f dur False
 
+-- переводит ноту в частоту
 noteToFreq :: String -> Int -> Double
 noteToFreq name octave = 
   let noteMap = [("C",0),("D",2),("E",4),("F",5),("G",7),("A",9),("B",11)]
@@ -137,7 +149,9 @@ noteToFreq name octave =
   in 440.0 * (2.0 ** (fromIntegral (semitone + (octave - 4) * 12 - 9) / 12.0))
 
 
--- SYNTHESIS
+
+
+-- Генерация звукового файла из нотной структуры (Часть 1 + Часть 2)
 synthesize :: [NoteDTO] -> Audio
 synthesize notes = 
     let 
@@ -152,7 +166,9 @@ synthesize notes =
     in
         Audio (round mySampleRate) [finalSig]
 
--- WAV I/O
+-- Синтаксический анализатор музыкальных файлов (WAV)
+
+-- Загрузка файла передача парсеру и вывод успеха / ошибки
 readWav :: FilePath -> IO (Either String Audio)
 readWav path = do
   content <- BL.readFile path
@@ -160,6 +176,7 @@ readWav path = do
     Left (_, _, err) -> Left $ "WAV Parse Error: " ++ err
     Right (_, _, audio) -> Right audio
 
+-- Разбор заголовка wav файла (проверка RIFF/WAVE)
 getWav :: Get Audio
 getWav = do
   riff <- getByteString 4
@@ -168,6 +185,7 @@ getWav = do
     wave <- getByteString 4
     if BS.unpack wave /= [87, 65, 86, 69] then fail "No WAVE" else scanChunks Nothing
 
+-- Разбор содержания wav файла (находим полезные чанки)
 scanChunks :: Maybe (Int, Int, Int) -> Get Audio
 scanChunks fmtInfo = do
   empty <- isEmpty
@@ -194,19 +212,24 @@ scanChunks fmtInfo = do
             return $ Audio sRate (deinterleave chans rawSamples)
       _ -> skip (fromIntegral chunkSize) >> scanChunks fmtInfo
 
+-- Нормализация 8-битного семпла
 normalize8 :: Word8 -> Double
 normalize8 w = (fromIntegral w - 128.0) / 128.0 
 
+-- Нормализация 16-битного семпла
 normalize16 :: Int16 -> Double
 normalize16 i = fromIntegral i / 32768.0
 
+-- Нормализация 32-битного семпла
 normalize32 :: Word32 -> Double
 normalize32 w = fromIntegral (fromIntegral w :: Int32) / 2147483648.0
 
+-- Разделение потока данных на каналы (стерео/моно)
 deinterleave :: Int -> [Double] -> [[Double]]
 deinterleave n xs | n <= 0 = [] | otherwise = [takeEvery n (drop i xs) | i <- [0..n-1]]
   where takeEvery step (y:ys) = y : takeEvery step (drop (step-1) ys); takeEvery _ [] = []
 
+-- Запись заголовка и содержания в WAV файл
 writeWav :: FilePath -> Audio -> IO ()
 writeWav path (Audio rate chans) = BL.writeFile path (runPut $ do
   let samples = interleave chans
@@ -223,15 +246,19 @@ writeWav path (Audio rate chans) = BL.writeFile path (runPut $ do
   putWord32le (fromIntegral dataSize)
   mapM_ (putInt16le . toPCM16) samples)
 
+-- Объединение каналов для записи в файл
 interleave :: [[Double]] -> [Double]
 interleave [] = []
 interleave chans = concat $ transpose chans
 
+-- Конвертация Double семпла обратно в 16-бит PCM
 toPCM16 :: Double -> Int16
 toPCM16 x = round (max (-1.0) (min 1.0 x) * 32767.0)
 
 
 -- EDITING
+
+-- Функция обрезки файла в заданных диапазонах
 trimAudio :: Double -> Double -> Audio -> Audio
 trimAudio start end (Audio rate chans) = 
     let startSamp = floor (start * fromIntegral rate)
@@ -239,13 +266,11 @@ trimAudio start end (Audio rate chans) =
         len       = endSamp - startSamp
     in Audio rate (map (take len . drop startSamp) chans)
 
+-- Сборка нового файла из частей (конкатенация)
 concatAudio :: Audio -> Audio -> Audio
 concatAudio (Audio r1 c1) (Audio r2 c2) =
     let 
-        
         c2Resampled = if r1 == r2 then c2 else map (resample r2 r1) c2
-        
-    
         len1 = if null c1 then 0 else length (head c1)
         len2 = if null c2Resampled then 0 else length (head c2Resampled)
         maxChans = max (length c1) (length c2Resampled)
@@ -257,6 +282,7 @@ concatAudio (Audio r1 c1) (Audio r2 c2) =
                       | i <- [0 .. maxChans - 1] ]
     in Audio r1 newChannels
 
+-- Ресемплинг для объединения файлов с разной частотой
 resample :: Int -> Int -> [Double] -> [Double]
 resample fromRate toRate input = go 0.0 input
   where
@@ -268,16 +294,21 @@ resample fromRate toRate input = go 0.0 input
       | pos < 1.0 = y : go (pos + step) list 
       | otherwise = go (pos - 1.0) ys        
 
--- EFFECTS
+-- EFFECTS (Функции реализующие эффекты обработки звукового сигнала)
+
+-- Пропорциональное изменение амплитуды сигнала (Громкость)
 changeAmplitude :: Double -> Audio -> Audio
 changeAmplitude f (Audio r c) = Audio r (map (map (* f)) c)
 
+-- Изменение амплитуды на заданное значение
 addAmplitude :: Double -> Audio -> Audio
 addAmplitude val (Audio r c) = Audio r (map (map (+ val)) c)
 
+-- Пропорциональное изменение частоты сигнала (Скорость)
 changeSpeed :: Double -> Audio -> Audio
 changeSpeed f (Audio r c) = Audio (round (fromIntegral r * f)) c
 
+-- Удаление амплитуды по предикату (гейт)
 removeByAmplitude :: String -> Double -> Audio -> Audio
 removeByAmplitude mode thr (Audio r c) = Audio r (map (map check) c)
   where 
@@ -287,19 +318,23 @@ removeByAmplitude mode thr (Audio r c) = Audio r (map (map check) c)
         "equal"  -> if abs (x - thr) < 0.0001 then 0 else x 
         _ -> x
 
+-- Нормализация громкости
 normalize :: Double -> Audio -> Audio
 normalize target (Audio r c) = 
     let peak = maximum (0 : map abs (concat c))
         factor = if peak == 0 then 1 else target / peak
     in changeAmplitude factor (Audio r c)
 
+-- Эффект эхо
 applyEcho :: Double -> Double -> Audio -> Audio
 applyEcho delay decay (Audio r c) = Audio r (map (\s -> zipWithLong (+) s (echoGen r delay decay s)) c)
   where echoGen rate d dec s = replicate (round (d * fromIntegral rate)) 0 ++ map (* dec) s
 
+-- Эффект дисторшн
 applyDistortion :: Double -> Audio -> Audio
 applyDistortion drive (Audio r c) = Audio r (map (map (\x -> (2/pi) * atan (x*drive))) c)
 
+-- Функция микширования обработанных внешних файлов и композиций
 mixAudio :: Audio -> Audio -> Audio
 mixAudio a1 a2 = 
     let (Audio r1 c1) = a1

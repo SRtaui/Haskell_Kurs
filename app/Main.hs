@@ -72,8 +72,8 @@ main = do
 mainMenu :: [Track] -> IO ()
 mainMenu tracks = do
   drawProjectState tracks
-  putStrLn "\n1. Добавить трек (Загрузка/Синтез)"
-  putStrLn "2. Редактировать (Разрезать/Удалить)"
+  putStrLn "\n1. Добавить трек"
+  putStrLn "2. Редактировать "
   putStrLn "3. Эффекты"
   putStrLn "4. Рендер и Сохранение"
   putStrLn "0. Выход"
@@ -95,7 +95,7 @@ addMenu :: [Track] -> IO ()
 addMenu tracks = do
     putStrLn "\n--- Добавить трек ---"
     putStrLn "1. Загрузить WAV файл"
-    putStrLn "2. Сгенерировать из TXT (Синтезатор)"
+    putStrLn "2. Сгенерировать из TXT"
     putStrLn "9. Назад"
     c <- prompt
     case c of
@@ -118,7 +118,7 @@ addMenu tracks = do
 editMenu :: [Track] -> IO ()
 editMenu tracks = do
     putStrLn "\n--- Редактирование ---"
-    putStrLn "1. Разрезать трек (Slice / Split)"
+    putStrLn "1. Разрезать трек "
     putStrLn "2. Удалить трек из списка"
     putStrLn "9. Назад"
     c <- prompt
@@ -128,7 +128,7 @@ editMenu tracks = do
             case mid of
                 Nothing -> editMenu tracks
                 Just idx -> do
-                    putStrLn "Введите диапазон для вырезания (трек будет разрезан по этим точкам)."
+                    putStrLn "Введите диапазон для вырезания."
                     s <- askDouble "Точка начала (сек):"
                     e <- askDouble "Точка конца (сек):"
                     
@@ -160,14 +160,14 @@ effectsMenu tracks = do
             mainMenu tracks 
         else do
             putStrLn "\n--- Процессор Эффектов ---"
-            putStrLn "1. Громкость (Умножение)"
-            putStrLn "2. Скорость воспроизведения (Pitch/Speed)"
-            putStrLn "3. Смещение амплитуды (+Значение)"
-            putStrLn "4. Установить частоту дискретизации (SampleRate)"
+            putStrLn "1. Громкость" --пропроциональное изменение амплитуды сигнала
+            putStrLn "2. Скорость воспроизведения " -- --пропроциональное изменение частоты сигнала
+            putStrLn "3. Смещение амплитуды " 
+            putStrLn "4. Установить частоту дискретизации " 
             putStrLn "5. Нормализация"
-            putStrLn "6. Гейт (Gate - удаление тишины/шума)"
-            putStrLn "7. Эхо (Delay)"
-            putStrLn "8. Дисторшн (Distortion)"
+            putStrLn "6. Гейт (Gate - удаление тишины/шума)" --удаление по предикату
+            putStrLn "7. Эхо "
+            putStrLn "8. Дисторшн "
             putStrLn "9. Назад"
             
             c <- prompt
@@ -180,15 +180,15 @@ effectsMenu tracks = do
                         let apply f = mainMenu (modifyTrack idx f tracks)
                         
                         case c of
-                            "1" -> askDouble "Коэффициент (например 0.5 или 2.0):" >>= \x -> apply (effectVolumeLogic x)
-                            "2" -> askDouble "Коэффициент скорости (0.5=медленно, 2.0=быстро):" >>= \x -> apply (effectSpeedLogic x)
+                            "1" -> askDouble "Коэффициент :" >>= \x -> apply (effectVolumeLogic x)
+                            "2" -> askDouble "Коэффициент скорости :" >>= \x -> apply (effectSpeedLogic x)
                             "3" -> askDouble "Значение смещения (-1.0 ... 1.0):" >>= \x -> apply (effectOffsetLogic x)
-                            "4" -> askDouble "Новая частота (например 44100):" >>= \x -> apply (effectSetRateLogic (round x))
+                            "4" -> askDouble "Новая частота :" >>= \x -> apply (effectSetRateLogic (round x))
                             "5" -> apply effectNormalizeLogic
                             "6" -> do
                                 putStrLn "Введите режим (lower - ниже порога, higher - выше, equal - равно):"
                                 m <- prompt 
-                                t <- askDouble "Порог (Threshold):"
+                                t <- askDouble "Порог:"
                                 apply (gateLogic m t)
                             "7" -> apply effectEchoLogic
                             "8" -> apply distortLogic
@@ -206,13 +206,13 @@ renderMenu tracks = do
     case c of
         "1" -> do
             let final = renderConcat tracks
-            path <- askString "Имя выходного файла (например out.wav):"
+            path <- askString "Имя выходного файла :"
             writeWav path final
             putStrLn "Файл сохранен!"
             mainMenu tracks
         "2" -> do
             let final = renderMix tracks
-            path <- askString "Имя выходного файла (например mix.wav):"
+            path <- askString "Имя выходного файла :"
             writeWav path final
             putStrLn "Файл сохранен!"
             mainMenu tracks
